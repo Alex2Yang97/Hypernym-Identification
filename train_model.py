@@ -44,10 +44,11 @@ if __name__ == "__main__":
     y.extend([0 for _ in range(len(meronym_pairs))])
     y.extend([0 for _ in range(len(random_pairs))])
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, test_size=0.2)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.8, test_size=0.2)#划分训练集
 
     model = DynamicMarginModel(os.path.join('data', 'hypernym_embedding'),\
                  os.path.join('data', 'hyponym_embedding'), C=8, class_weight='balanced')
+#    print(model)
 
     model.fit(X_train, y_train)
     print('Train score: {}'.format(model.score(X_train, y_train)))

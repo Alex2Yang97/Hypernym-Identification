@@ -25,15 +25,18 @@ class EmbeddingTrainer():
         """Load data."""
         with open(filename, 'r') as file:
             for line in file:
-                hypernym, hyponym, count = line.split('\t')
-                self.hypernym_vocab.append(hypernym)
-                self.hyponym_vocab.append(hyponym)
+                hypernym, hyponym, count = line.split('\t')#分割得到三元组
+                self.hypernym_vocab.append(hypernym)#加入上位词数组
+                self.hyponym_vocab.append(hyponym)#加入下位词数组
                 self.data[(hypernym, hyponym)] = int(count)
+                #data是个字典
+                #probase文本格式   site	rainham	2
+
 
         if self.verbose > 1:
             print("File loaded.")
 
-        self.filter_data(minimum_count, minimum_frequency)
+        self.filter_data(minimum_count, minimum_frequency)#把出现次数少的单词过滤掉，把出现次数少的上下位关系去掉
 
         if self.verbose > 1:
             print("Data filtered.")
@@ -46,6 +49,7 @@ class EmbeddingTrainer():
             print("Duplicate words removed.")
 
         # Dictionary which maps word to its index.
+        #上下位词 单词和索引的字典
         self.word_hypernym_ix = {word: i for i, word in enumerate(self.hypernym_vocab)}
         self.word_hyponym_ix = {word: i for i, word in enumerate(self.hyponym_vocab)}
 
@@ -63,20 +67,29 @@ class EmbeddingTrainer():
             self.hyponym_vocabulary_size = hyponym_vocabulary_size
             self.embedding_size = embedding_size
 
+            #torch.nn.Embedding(m,n) m表示单词的总词数，n表示词嵌入的维度，每一行表示一个单词
+            #构建上位词的embedding矩阵
             self.hypernym_embedding = nn.Embedding(self.hypernym_vocabulary_size, self.embedding_size)
+            #构建下位词的embedding矩阵
             self.hyponym_embedding = nn.Embedding(self.hyponym_vocabulary_size, self.embedding_size)
 
         def forward(self, hypernym_ix, hyponym_ix, count, hypernym_ix1, hyponym_ix1, count1):
+            #计算索引为ix的上位词、下位词的embed
             embed_hypernym = self.hypernym_embedding(hypernym_ix)
             embed_hyponym = self.hyponym_embedding(hyponym_ix)
 
+            #计算索引为ix1的上位词、下位词的embed
             embed_hypernym1 = self.hypernym_embedding(hypernym_ix1)
             embed_hyponym1 = self.hyponym_embedding(hyponym_ix1)
 
+            #计算p范数，维度为1
             norm = (embed_hypernym - embed_hyponym).norm(p=1, dim=1)
             norm1 = (embed_hypernym1 - embed_hyponym1).norm(p=1, dim=1)
 
+            #log1p(count)是  log(count+1)
             cost = (norm + count.log1p()) - (norm1 + count1.log1p())
+            
+            #将cost限制在大于0的范围内 clamp(input,min,max)
             cost = torch.clamp(cost, min=0)
             return cost
 
@@ -112,6 +125,7 @@ class EmbeddingTrainer():
         optimizer = optim.SGD(self.net.parameters(), lr=lr)
 
         # Used for temporarily storing data before gradient is updated
+        #batch为空
         batch = EmbeddingTrainer.Batch()
 
         for epoch in range(epochs):
@@ -122,14 +136,20 @@ class EmbeddingTrainer():
             for (hypernym, hyponym), count in self.data.items():
                 for _ in range(count):
                     # Randomly change hypernym or hyponym
+                    #返回0、1之间的随机项
                     choice = random.choice([0, 1])
                     if choice is 0:
+                        #随机选择上位词，或随机选择下位词
                         hypernym1 = random.choice(self.hypernym_vocab)
                         hyponym1 = hyponym
                     else:
                         hypernym1 = hypernym
                         hyponym1 = random.choice(self.hyponym_vocab)
+                    
+                    #(hypernym1, hyponym1)存在时，返回索引；不存在时返回0
                     count1 = self.data.get((hypernym1, hyponym1), 0)
+                    
+                    #把 抽取的组合、随机产生的组合 加入到batch中
                     batch.add(hypernym, hyponym, count, hypernym1, hyponym1, count1)
                     counter += 1
 
@@ -139,9 +159,11 @@ class EmbeddingTrainer():
                         hypernyms_ix = Variable(torch.LongTensor([self.word_hypernym_ix[hypernym] for hypernym in batch.hypernyms]))
                         hyponyms_ix = Variable(torch.LongTensor([self.word_hyponym_ix[hyponym] for hyponym in batch.hyponyms]))
 
+                        #找出所有的batch中的索引
                         hypernyms1_ix = Variable(torch.LongTensor([self.word_hypernym_ix[hypernym1] for hypernym1 in batch.hypernyms1]))
                         hyponyms1_ix = Variable(torch.LongTensor([self.word_hyponym_ix[hyponym1] for hyponym1 in batch.hyponyms1]))
 
+                        #输出所有的count和counts
                         counts_var = Variable(torch.Tensor(batch.counts))
                         counts1_var = Variable(torch.Tensor(batch.counts1))
 
@@ -153,6 +175,7 @@ class EmbeddingTrainer():
                             cost = self.net(hypernyms_ix, hyponyms_ix, counts_var, hypernyms1_ix, hyponyms1_ix, counts1_var)
                             
 
+                        #data[0]？？？？？？？？？？
                         cost_epoch += torch.sum(cost).data[0]
                         optimizer.zero_grad()
                         if gpu:
@@ -171,7 +194,9 @@ class EmbeddingTrainer():
                                                                               (counter / self.total_examples_epoch) * 100))
 
             # Update the gradients for remaining data
+            #batch是空集，则跳过
             if not batch.is_empty():
+                #所有的索引？？？？
                 hypernyms_ix = Variable(torch.LongTensor([self.word_hypernym_ix[hypernym] for hypernym in batch.hypernyms]))
                 hyponyms_ix = Variable(torch.LongTensor([self.word_hyponym_ix[hyponym] for hyponym in batch.hyponyms]))
 
@@ -188,11 +213,13 @@ class EmbeddingTrainer():
                 else:                        
                     cost = self.net(hypernyms_ix, hyponyms_ix, counts_var, hypernyms1_ix, hyponyms1_ix, counts1_var)
 
+                #data[0]？？？？？？
                 cost_epoch += torch.sum(cost).data[0]
                 optimizer.zero_grad()
                 if gpu:
                     cost.backward(torch.ones(cost.size()).cuda())
                 else:
+                    #和cost.backward()是一样的
                     cost.backward(torch.ones(cost.size()))
                 optimizer.step()
 
@@ -229,6 +256,7 @@ class EmbeddingTrainer():
 
     def array_to_string(self, array):
         """Convert numpy array to string"""
+        #将数组转化成字符串
         string = '\t'.join(map(str, array))
         return string
 
